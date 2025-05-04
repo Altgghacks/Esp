@@ -1,0 +1,206 @@
+--// Universal ESP (Box + Name + Tracer + Health Right)
+
+--// SETTINGS
+local Settings = {
+	DefaultColor = Color3.fromRGB(255, 0, 0),
+	TeamCheck = false,
+	TracerOrigin = "Bottom" -- "Bottom" or "Center"
+}
+
+--// SERVICES
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+--// VARIABLES
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+--// SHORTCUTS
+local Vector2_new = Vector2.new
+local Color3_new = Color3.new
+local Drawing_new = Drawing.new
+local Tan, Rad = math.tan, math.rad
+local Clamp = math.clamp
+
+--// HELPERS
+local function Round(...)
+	local args, out = {...}, {}
+	for i, v in ipairs(args) do
+		out[i] = math.round(v)
+	end
+	return unpack(out)
+end
+
+local function WorldToViewport(position)
+	local screenPos, onScreen = Camera:WorldToViewportPoint(position)
+	return Vector2_new(screenPos.X, screenPos.Y), onScreen, screenPos.Z
+end
+
+--// CACHE
+local EspCache = {}
+
+--// CREATE ESP OBJECTS
+local function CreateESP(player)
+	local outline = Drawing_new("Square")
+	outline.Thickness = 3
+	outline.Filled = false
+	outline.Color = Color3_new(0, 0, 0)
+	outline.Visible = false
+	outline.ZIndex = 1
+
+	local box = Drawing_new("Square")
+	box.Thickness = 1
+	box.Filled = false
+	box.Visible = false
+	box.ZIndex = 2
+
+	local nameText = Drawing_new("Text")
+	nameText.Size = 16
+	nameText.Center = true
+	nameText.Outline = true
+	nameText.Font = 2
+	nameText.Visible = false
+	nameText.ZIndex = 3
+
+	local tracer = Drawing_new("Line")
+	tracer.Thickness = 1
+	tracer.Visible = false
+	tracer.ZIndex = 1
+
+	local healthBar = Drawing_new("Line")
+	healthBar.Thickness = 3 -- Health bar thickness increased
+	healthBar.Visible = false
+	healthBar.ZIndex = 2
+
+	EspCache[player] = {
+		Box = box,
+		Outline = outline,
+		Name = nameText,
+		Tracer = tracer,
+		Health = healthBar
+	}
+end
+
+--// REMOVE ESP OBJECTS
+local function RemoveESP(player)
+	local drawings = EspCache[player]
+	if drawings then
+		for _, obj in pairs(drawings) do
+			obj:Remove()
+		end
+		EspCache[player] = nil
+	end
+end
+
+--// UPDATE ESP EACH FRAME
+local function UpdateESP(player, drawings)
+	local character = player.Character
+	if not character then return end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+
+	local pos, onScreen, depth = WorldToViewport(root.Position)
+	local box, outline, name, tracer, healthBar = drawings.Box, drawings.Outline, drawings.Name, drawings.Tracer, drawings.Health
+
+	if not onScreen or depth <= 0 then
+		box.Visible = false
+		outline.Visible = false
+		name.Visible = false
+		tracer.Visible = false
+		healthBar.Visible = false
+		return
+	end
+
+	local scale = 1 / (depth * Tan(Rad(Camera.FieldOfView / 2)) * 2) * 1000
+	local width, height = Round(4 * scale, 6 * scale)
+	local x, y = Round(pos.X, pos.Y)
+
+	local boxPos = Vector2_new(x - width / 2, y - height / 2)
+	local boxSize = Vector2_new(width, height)
+	local color = player.Team and player.TeamColor.Color or Settings.DefaultColor
+
+	-- Box
+	box.Position = boxPos
+	box.Size = boxSize
+	box.Color = color
+	box.Visible = true
+
+	-- Outline
+	outline.Position = boxPos
+	outline.Size = boxSize
+	outline.Visible = true
+
+	-- Name
+	name.Text = player.Name
+	name.Position = Vector2_new(x, y - height / 2 - 16)
+	name.Size = Clamp(20 - (depth / 30), 13, 20)
+	name.Color = color
+	name.Visible = true
+
+	-- Tracer
+	local screenSize = Camera.ViewportSize
+	local originY = (Settings.TracerOrigin == "Center" and screenSize.Y / 2) or screenSize.Y
+	tracer.From = Vector2_new(screenSize.X / 2, originY)
+	tracer.To = Vector2_new(x, y + height / 2)
+	tracer.Thickness = Clamp(2.5 - (depth / 75), 1, 2.5)
+	tracer.Color = color
+	tracer.Visible = true
+
+	-- Health Bar (Right Side)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		local hp = humanoid.Health
+		local maxHp = humanoid.MaxHealth
+		local ratio = Clamp(hp / maxHp, 0, 1)
+
+		local barHeight = height
+		local barFilled = barHeight * ratio
+		local barX = boxPos.X + width + 3 -- Right side of box
+
+		local yBottom = boxPos.Y + height
+		local yTop = yBottom - barFilled
+
+		local red = Clamp(1 - ratio, 0, 1)
+		local green = Clamp(ratio, 0, 1)
+		local hpColor = Color3_new(red, green, 0)
+
+		healthBar.From = Vector2_new(barX, yBottom)
+		healthBar.To = Vector2_new(barX, yTop)
+		healthBar.Color = hpColor
+		healthBar.Thickness = 3 -- Health bar thickness increased
+		healthBar.Visible = true
+	else
+		healthBar.Visible = false
+	end
+end
+
+--// INITIALIZE EXISTING PLAYERS
+for _, player in ipairs(Players:GetPlayers()) do
+	if player ~= LocalPlayer then
+		CreateESP(player)
+	end
+end
+
+--// PLAYER EVENTS
+Players.PlayerAdded:Connect(function(player)
+	if player ~= LocalPlayer then
+		CreateESP(player)
+	end
+end)
+
+Players.PlayerRemoving:Connect(RemoveESP)
+
+--// MAIN LOOP
+RunService:BindToRenderStep("UniversalESP", Enum.RenderPriority.Camera.Value, function()
+	for player, drawings in pairs(EspCache) do
+		if player ~= LocalPlayer then
+			if Settings.TeamCheck and player.Team == LocalPlayer.Team then
+				for _, obj in pairs(drawings) do obj.Visible = false end
+			else
+				UpdateESP(player, drawings)
+			end
+		end
+	end
+end)
