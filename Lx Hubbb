@@ -1,9 +1,9 @@
---// Universal ESP (Box + Name + Tracer + Health Right)
+--// Universal ESP (Box + Name + Tracer + Health Right with Team-Based Highlight)
 
 --// SETTINGS
 local Settings = {
-	DefaultColor = Color3.fromRGB(255, 0, 0),
-	TeamCheck = false,
+	DefaultColor = Color3.fromRGB(255, 0, 0),  -- Default color for players without a team
+	TeamCheck = false,  -- Whether to check team colors
 	TracerOrigin = "Bottom" -- "Bottom" or "Center"
 }
 
@@ -11,6 +11,7 @@ local Settings = {
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
 
 --// VARIABLES
 local LocalPlayer = Players.LocalPlayer
@@ -37,11 +38,12 @@ local function WorldToViewport(position)
 	return Vector2_new(screenPos.X, screenPos.Y), onScreen, screenPos.Z
 end
 
---// CACHE
+--// ESP CACHE
 local EspCache = {}
 
 --// CREATE ESP OBJECTS
 local function CreateESP(player)
+	-- Create the ESP objects (box, outline, name, etc.)
 	local outline = Drawing_new("Square")
 	outline.Thickness = 3
 	outline.Filled = false
@@ -69,7 +71,7 @@ local function CreateESP(player)
 	tracer.ZIndex = 1
 
 	local healthBar = Drawing_new("Line")
-	healthBar.Thickness = 3 -- Health bar thickness increased
+	healthBar.Thickness = 3
 	healthBar.Visible = false
 	healthBar.ZIndex = 2
 
@@ -80,6 +82,42 @@ local function CreateESP(player)
 		Tracer = tracer,
 		Health = healthBar
 	}
+
+	-- Create highlight for the player
+	local Highlight = Instance.new("Highlight")
+	Highlight.Name = player.Name
+	Highlight.FillTransparency = 0.5
+	Highlight.OutlineTransparency = 0
+	Highlight.Parent = CoreGui
+	
+	local function updateColors()
+		local color = player.Team and player.TeamColor.Color or Settings.DefaultColor
+		-- Update all ESP colors based on the player's team color
+		box.Color = color
+		outline.Color = Color3_new(0, 0, 0)  -- Black outline
+		nameText.Color = color
+		tracer.Color = color
+		healthBar.Color = Color3_new(1 - color.r, 1 - color.g, 1 - color.b)  -- Inverse color for health bar
+
+		Highlight.FillColor = color
+		Highlight.OutlineColor = Color3.fromRGB(255, 255, 255)  -- White outline
+	end
+	updateColors()
+
+	-- Update colors when the player's team changes
+	player:GetPropertyChangedSignal("Team"):Connect(updateColors)
+
+	-- Set highlight adornee to character
+	local function updateAdornee()
+		local character = player.Character
+		if character then
+			Highlight.Adornee = character
+		end
+	end
+	updateAdornee()
+
+	-- Update adornee when character respawns
+	player.CharacterAdded:Connect(updateAdornee)
 end
 
 --// REMOVE ESP OBJECTS
@@ -169,7 +207,7 @@ local function UpdateESP(player, drawings)
 		healthBar.From = Vector2_new(barX, yBottom)
 		healthBar.To = Vector2_new(barX, yTop)
 		healthBar.Color = hpColor
-		healthBar.Thickness = 3 -- Health bar thickness increased
+		healthBar.Thickness = 3
 		healthBar.Visible = true
 	else
 		healthBar.Visible = false
